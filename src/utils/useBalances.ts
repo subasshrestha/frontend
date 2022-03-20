@@ -157,7 +157,7 @@ export default function useBalances() {
         streamBalanceUSD,
         streamBalanceZIL,
         membershipZIL: membershipZIL,
-        isMember: isMember
+        isMember: true
       },
       rewards
     }
