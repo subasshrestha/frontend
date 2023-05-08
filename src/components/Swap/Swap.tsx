@@ -11,14 +11,14 @@ import Tippy from '@tippyjs/react'
 import TokenIcon from 'components/TokenIcon'
 import { Exchange } from 'lib/exchange/exchange'
 import { ZilSwap } from 'lib/exchange/zilswap/zilswap'
-import { toast } from 'react-toastify'
-import { ZIL_ADDRESS } from 'lib/constants'
+import { STREAM_ADDRESS, ZIL_ADDRESS } from 'lib/constants'
 import { BIG_ONE } from 'utils/strings'
 import { openExchange } from 'store/modal/actions'
-import { shortenAddress } from 'utils/addressShortener'
 import { updateSwap } from 'store/swap/actions'
 import { XCADDex } from 'lib/exchange/xcaddex/xcaddex'
 import { addNotification } from 'store/notification/actions'
+import dayjs from 'dayjs'
+import getExchange from 'lib/zilstream/getExchange'
 
 interface Props {
   showFullscreen?: boolean
@@ -42,10 +42,18 @@ const Swap = (props: Props) => {
     focusDirectionIn: true,
     needsApproval: false
   })
-  const limitTokensToDirectPairs = swapState.exchange.identifier === 'xcaddex' ? true : false
 
   useEffect(() => {
     initiateExchange()
+
+    if(swapState.tokenInAddress === null || swapState.tokenOutAddress === null) {
+      dispatch(updateSwap({
+        tokenInAddress: swapState.exchange.baseTokenAddress,
+        tokenOutAddress: STREAM_ADDRESS
+      }))
+    }
+
+    getPairsForExchange()
   }, [])
 
   useEffect(() => {
@@ -55,29 +63,103 @@ const Swap = (props: Props) => {
   const initiateExchange = () => {
     let zilPay = (window as any).zilPay
 
+    if(typeof zilPay === "undefined") {
+      console.log("ZilPay extension not installed")
+      return
+    }
+
     if(swapState.exchange.identifier === 'zilswap') {
       setExchange(new ZilSwap(blockchainState.client, zilPay))
-    } else if(swapState.exchange.identifier === 'xcaddex') {
+    } else if(swapState.exchange.identifier === 'xcad-dex') {
       setExchange(new XCADDex(blockchainState.client, zilPay))
     }
   }
 
+  useEffect(() => {
+    // When a token gets set, check if the current routing is available. If not
+    // make an educated guess.
+    if(swapState.exchange.hasRouting) {
+      // Check if the same token has been entered
+      if(swapState.tokenInAddress === swapState.tokenOutAddress) {
+        if(swapState.selectedDirection === "in") {
+          dispatch(updateSwap({
+            tokenOutAddress: swapState.tokenInAddress === ZIL_ADDRESS ? STREAM_ADDRESS : ZIL_ADDRESS
+          }))
+        } else {
+          dispatch(updateSwap({
+            tokenInAddress: swapState.tokenOutAddress === ZIL_ADDRESS ? STREAM_ADDRESS : ZIL_ADDRESS
+          }))
+        }
+      }      
+    } else {
+      if(swapState.selectedDirection === "in") {
+        let quoteTokens = [...new Set(swapState.availablePairs.filter(pair => pair.base_address === swapState.tokenInAddress).map(pair => pair.quote_address))] 
+        let baseTokens = [...new Set(swapState.availablePairs.filter(pair => pair.quote_address === swapState.tokenInAddress).map(pair => pair.base_address))]
+        let availableTokens = quoteTokens.concat(baseTokens)
+
+        if(swapState.tokenOutAddress && availableTokens.includes(swapState.tokenOutAddress)) return
+ 
+        if(quoteTokens.length > 0) {
+          dispatch(updateSwap({
+            tokenOutAddress: quoteTokens[0]
+          }))
+        } else {
+          dispatch(updateSwap({
+            tokenOutAddress: baseTokens[0]
+          }))
+        }
+      } else {
+        let quoteTokens = [...new Set(swapState.availablePairs.filter(pair => pair.base_address === swapState.tokenOutAddress).map(pair => pair.quote_address))] 
+        let baseTokens = [...new Set(swapState.availablePairs.filter(pair => pair.quote_address === swapState.tokenOutAddress).map(pair => pair.base_address))]
+        let availableTokens = quoteTokens.concat(baseTokens)
+
+        if(swapState.tokenInAddress && availableTokens.includes(swapState.tokenInAddress)) return
+
+        if(quoteTokens.length > 0) {
+          dispatch(updateSwap({
+            tokenInAddress: quoteTokens[0]
+          }))
+        } else {
+          dispatch(updateSwap({
+            tokenInAddress: baseTokens[0]
+          }))
+        }
+      }      
+    }
+  }, [swapState.tokenInAddress, swapState.tokenOutAddress])
+
   const { tokenIn, tokenOut } = useMemo(() => {
     return {
-      tokenIn: tokenState.tokens.filter(t => t.address_bech32 === tokenInAddress)?.[0],
-      tokenOut: tokenState.tokens.filter(t => t.address_bech32 === tokenOutAddress)?.[0]
+      tokenIn: tokenState.tokens.filter(t => t.address === tokenInAddress)?.[0],
+      tokenOut: tokenState.tokens.filter(t => t.address === tokenOutAddress)?.[0]
     }
   }, [tokenState, swapState])
 
   useEffect(() => {
+    if(!tokenState.initialized) return
+
+    dispatch(updateSwap({
+      tokenInAddress: swapState.exchange.baseTokenAddress,
+      tokenOutAddress: STREAM_ADDRESS
+    }))
+
+    getPairsForExchange()
+  }, [swapState.exchange])
+
+  useEffect(() => {
     if(!exchange || !tokenIn) return
 
-    if(tokenIn.address_bech32 === ZIL_ADDRESS) {
+    if(tokenIn.address === ZIL_ADDRESS) {
       setState({...state, needsApproval: false})
     } else {
       checkApproval()
-      }
+    }
   }, [exchange, swapState.tokenInAddress])
+
+  const getPairsForExchange = async () => {
+    let exchange = await getExchange(swapState.exchange.identifier)
+    dispatch(updateSwap({ availablePairs: exchange.pairs }))
+  }
 
   const checkApproval = async () => {
     const approval = await exchange!.tokenNeedsApproval(tokenIn, BIG_ONE)
@@ -86,15 +168,15 @@ const Swap = (props: Props) => {
 
   const getCurrentRate = (): BigNumber => {
     if(!tokenIn || !tokenOut) return new BigNumber(0)
-    const inRate = toBigNumber(tokenIn.symbol === 'ZIL' ? 1 : tokenIn.market_data.rate)
-    const outRate = toBigNumber(tokenOut.symbol === 'ZIL' ? 1 : tokenOut.market_data.rate)
+    const inRate = toBigNumber(tokenIn.symbol === 'ZIL' ? 1 : tokenIn.market_data.rate_zil)
+    const outRate = toBigNumber(tokenOut.symbol === 'ZIL' ? 1 : tokenOut.market_data.rate_zil)
     return inRate.dividedBy(outRate)
   }
 
   const reverse = () => {
     dispatch(updateSwap({
-      tokenInAddress: tokenOut.address_bech32,
-      tokenOutAddress: tokenIn.address_bech32
+      tokenInAddress: tokenOut.address,
+      tokenOutAddress: tokenIn.address
     }))
     setState(previousState => {
       return {
@@ -115,9 +197,9 @@ const Swap = (props: Props) => {
     } else {
       dispatch(addNotification({
         notification: {
-          timestamp: + new Date(),
+          timestamp: dayjs().unix(),
           title: `Approve ${tokenIn.symbol} for ${swapState.exchange.name}`,
-          hash: tx.hash,
+          hash: `0x${tx.id}`,
           status: "pending",
         }
       }))
@@ -142,15 +224,15 @@ const Swap = (props: Props) => {
 
     dispatch(addNotification({
       notification: {
-        timestamp: + new Date(),
+        timestamp: dayjs().unix(),
         title: `Swap ${cryptoFormat(state.tokenInAmount.toNumber())} ${tokenIn.symbol} to ${cryptoFormat(state.tokenOutAmount.toNumber())} ${tokenOut.symbol}`,
-        hash: tx.hash,
+        hash: `0x${tx.id}`,
         status: "pending",
       }
     }))
   }
 
-  let tokenInValue = tokenIn?.symbol === 'ZIL' ? selectedCurrency.rate : tokenIn?.market_data.rate * selectedCurrency.rate
+  let tokenInValue = tokenIn?.symbol === 'ZIL' ? selectedCurrency.rate : tokenIn?.market_data.rate_zil * selectedCurrency.rate
 
   return (
     <div>

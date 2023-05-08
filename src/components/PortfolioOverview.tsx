@@ -20,7 +20,7 @@ function PortfolioOverview() {
   const stakingState = useSelector<RootState, StakingState>(state => state.staking)
   const currencyState = useSelector<RootState, CurrencyState>(state => state.currency)
   const selectedCurrency: Currency = currencyState.currencies.find(currency => currency.code === currencyState.selectedCurrency)!
-  const { totalBalance, holdingBalance, liquidityBalance, stakingBalance, membership, rewards } = useBalances()
+  const { totalBalance, holdingBalance, liquidityBalance, stakingBalance, collectionBalance, membership, rewards } = useBalances()
 
   const estimatedFees = tokenState.tokens.reduce((sum, current) => {
     if(!current.pools) return sum
@@ -32,7 +32,7 @@ function PortfolioOverview() {
       let contributionPercentage = pool.userContribution.dividedBy(pool.totalContribution).times(100)
       let contributionShare = contributionPercentage.shiftedBy(-2)
 
-      let volume = toBigNumber(current.market_data.daily_volume)
+      let volume = toBigNumber(current.market_data.daily_volume_zil)
       let fees = volume.times(0.003).times(contributionShare)
       newSum = newSum.plus(fees)
     })
@@ -42,15 +42,15 @@ function PortfolioOverview() {
 
   const totalRewardZil = Object.keys(rewards).reduce((sum, current) => {
     let reward = rewards[current]
-    let token = tokenState.tokens.filter(token => token.address_bech32 === reward.address)[0]
+    let token = tokenState.tokens.filter(token => token.address === reward.address)[0]
     if(token.symbol === 'ZIL') {
       return sum.plus(reward.amount)
     }
-    return sum.plus(reward.amount.times(token.market_data.rate))
+    return sum.plus(reward.amount.times(token.market_data.rate_zil))
   }, new BigNumber(0))
 
   return (
-    <div className="bg-white dark:bg-gray-800 py-4 px-5 rounded-lg sm:w-96 max-w-full flex-shrink-0 flex-grow-0 mr-4">
+    <div className="bg-white dark:bg-gray-800 py-4 px-5 rounded-lg sm:w-96 max-w-full flex-shrink-0 flex-grow-0 mr-6">
       <div className="text-gray-600 dark:text-gray-400 text-sm">Current Balance</div>
       <div className="flex-grow flex flex-col items-start mb-6">
         <div className="font-semibold text-2xl">
@@ -91,6 +91,11 @@ function PortfolioOverview() {
               {currencyFormat(totalRewardZil.times(selectedCurrency.rate).toNumber(), selectedCurrency.symbol)}
             </div>
             <div className="text-gray-500 text-md ml-2">{moneyFormat(totalRewardZil, {compression: 0, maxFractionDigits: 2})} ZIL</div>
+          </div>
+          <div className="-mt-1 mb-1">
+            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+              Weekly: {currencyFormat(totalRewardZil.times(7).times(selectedCurrency.rate).toNumber(), selectedCurrency.symbol)} ({moneyFormat(totalRewardZil.times(7), {compression: 0, maxFractionDigits: 2})} ZIL)
+            </span>
           </div>
           <div className="text-sm">
             {Object.keys(rewards).map(address => {
@@ -140,6 +145,16 @@ function PortfolioOverview() {
             {currencyFormat(stakingBalance.times(selectedCurrency.rate).toNumber(), selectedCurrency.symbol)}
           </div>
           <div className="text-gray-500 text-md ml-2">{moneyFormat(stakingBalance, {compression: 0, maxFractionDigits: 2})} ZIL</div>
+        </div>
+      </div>
+
+      <div className="text-gray-600 dark:text-gray-400 text-sm border-b dark:border-gray-700 pb-2 mb-2 mt-8">NFT Collections</div>
+      <div className="flex items-start">
+        <div className="flex-grow flex items-center">
+          <div className="font-medium text-xl">
+            {currencyFormat(collectionBalance.times(selectedCurrency.rate).toNumber(), selectedCurrency.symbol)}
+          </div>
+          <div className="text-gray-500 text-md ml-2">{moneyFormat(collectionBalance, {compression: 0, maxFractionDigits: 2})} ZIL</div>
         </div>
       </div>
     </div>

@@ -6,7 +6,7 @@ import TokenIcon from './TokenIcon'
 import useMoneyFormatter, { toBigNumber } from 'utils/useMoneyFormatter'
 import { AccountState, RootState, Token, TokenState } from 'store/types'
 import { useSelector } from 'react-redux'
-import { shortenAddress } from 'utils/addressShortener'
+import { shortenAddress } from 'utils/shorten'
 import { ZIL_ADDRESS } from 'lib/constants'
 
 interface Props {
@@ -20,7 +20,7 @@ const TransactionRow = (props: Props) => {
   const moneyFormat = useMoneyFormatter()
 
   const findToken = (address: string): Token|null => {
-    const tokens = tokenState.tokens.filter(token => token.address_bech32 === address)
+    const tokens = tokenState.tokens.filter(token => token.address === address)
     if(tokens.length > 0) {
       return tokens[0]
     }

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import BigNumber from 'bignumber.js'
 import { useSelector } from 'react-redux'
-import { AccountState, RootState, StakingState, Token, TokenState } from 'store/types'
+import { AccountState, CollectionState, RootState, StakingState, Token, TokenState } from 'store/types'
 import { BIG_ZERO } from './strings'
 import { toBigNumber } from './useMoneyFormatter'
 
@@ -16,14 +16,16 @@ export default function useBalances() {
   const tokenState = useSelector<RootState, TokenState>(state => state.token)
   const stakingState = useSelector<RootState, StakingState>(state => state.staking)
   const accountState = useSelector<RootState, AccountState>(state => state.account)
+  const collectionState = useSelector<RootState, CollectionState>(state => state.collection)
 
-  const { totalBalance, holdingBalance, liquidityBalance, stakingBalance, membership, rewards } = useMemo(() => {
+  const { totalBalance, holdingBalance, liquidityBalance, stakingBalance, collectionBalance, membership, rewards } = useMemo(() => {
     if(!tokenState.initialized) {
       return {
         totalBalance: new BigNumber(0),
         holdingBalance: new BigNumber(0),
         liquidityBalance: new BigNumber(0),
         stakingBalance: new BigNumber(0),
+        collectionBalance: new BigNumber(0),
         membership: {
           streamBalance: new BigNumber(0),
           streamBalanceUSD: new BigNumber(0),
@@ -54,14 +56,15 @@ export default function useBalances() {
       }
 
       streamBalance = streamBalance.shiftedBy(-8)
-      streamBalanceUSD = streamBalance.times(streamToken.market_data.rate).times(tokenState.zilRate)
-      streamBalanceZIL = streamBalance.times(streamToken.market_data.rate)
+      streamBalanceUSD = streamBalance.times(streamToken.market_data.rate_zil).times(tokenState.zilRate)
+      streamBalanceZIL = streamBalance.times(streamToken.market_data.rate_zil)
     }
 
     var totalBalance = new BigNumber(0)
     var holdingBalance = new BigNumber(0)
     var liquidityBalance = new BigNumber(0)
     var stakingBalance = new BigNumber(0)
+    var collectionBalance = new BigNumber(0)
 
     if(tokenState.initialized) {
       holdingBalance = tokenState.tokens.reduce((sum, current) => {
@@ -69,7 +72,7 @@ export default function useBalances() {
     
         if(current.isZil) return sum.plus(balance)
     
-        return sum.plus(balance.times(current.market_data.rate))
+        return sum.plus(balance.times(current.market_data.rate_zil))
       }, new BigNumber(0))
       totalBalance = totalBalance.plus(holdingBalance)
     
@@ -81,7 +84,7 @@ export default function useBalances() {
             if(!pool.totalContribution || !pool.userContribution) return
             let contributionPercentage = pool.userContribution.dividedBy(pool.totalContribution).times(100)
             let contributionShare = contributionPercentage.shiftedBy(-2)
-            let zilAmount = (pool.baseReserve ?? BIG_ZERO).shiftedBy(-current.decimals).times(current.market_data.rate).times(2).times(contributionShare)
+            let zilAmount = (pool.baseReserve ?? BIG_ZERO).shiftedBy(-current.decimals).times(current.market_data.rate_zil).times(2).times(contributionShare)
             newSum = newSum.plus(zilAmount)
           })
         }
@@ -96,14 +99,23 @@ export default function useBalances() {
           return sum.plus(staked)
         } else {
           let staked = toBigNumber(current.staked, {compression: current.decimals})
-          let rate = tokenState.tokens.filter(token => token.symbol == current.symbol)[0].market_data.rate
+          let rate = tokenState.tokens.filter(token => token.symbol == current.symbol)[0].market_data.rate_zil
           return sum.plus(staked.times(rate))
         }
       }, new BigNumber(0))
       totalBalance = totalBalance.plus(stakingBalance)
     }
 
-    const membershipZIL = totalBalance.dividedBy(200)
+    if(collectionState.initialized) {
+      collectionBalance = collectionState.collections.reduce((sum, current) => {
+        if(!current.tokens || current.tokens.length === 0) return sum
+        let floor = toBigNumber(current.market_data.floor_price)
+        return sum.plus(floor.times(current.tokens.length))
+      }, new BigNumber(0))
+      totalBalance = totalBalance.plus(collectionBalance)
+    }
+
+    const membershipZIL = totalBalance.minus(collectionBalance).dividedBy(200)
     const isMember = streamBalanceZIL.isGreaterThanOrEqualTo(membershipZIL) && streamBalanceZIL.isGreaterThan(0)
 
     var rewards: {[key: string]: TokenReward} = {}
@@ -115,10 +127,8 @@ export default function useBalances() {
         if(!pool.userContribution || !pool.totalContribution || pool.userContribution.isZero()) return
 
         token.rewards.filter(reward => reward.exchange_id === pool.dex).forEach(reward => {
-          let contributionPercentage = (reward.adjusted_total_contributed !== null && reward.adjusted_total_contributed !== '1') ? 
-            pool.userContribution!.dividedBy(toBigNumber(reward.adjusted_total_contributed)).times(100) :
-            pool.userContribution!.dividedBy(pool.totalContribution ?? BIG_ZERO).times(100)
-          let contributionShare = contributionPercentage.shiftedBy(-2)
+          let contributionPercentage = pool.userContribution!.dividedBy(pool.totalContribution ?? 0).times(100)
+              let contributionShare = contributionPercentage.shiftedBy(-2)
           let currentReward = rewards[reward.reward_token_address]
           let newReward = toBigNumber(reward.amount).times(contributionShare)
   
@@ -152,6 +162,7 @@ export default function useBalances() {
       holdingBalance,
       liquidityBalance,
       stakingBalance,
+      collectionBalance,
       membership: {
         streamBalance,
         streamBalanceUSD,
@@ -168,6 +179,7 @@ export default function useBalances() {
     holdingBalance, 
     liquidityBalance, 
     stakingBalance,
+    collectionBalance,
     membership,
     rewards
   }

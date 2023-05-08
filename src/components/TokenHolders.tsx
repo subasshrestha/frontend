@@ -4,7 +4,7 @@ import { ZILSWAP_ADDRESS } from 'lib/constants'
 import React, { useEffect, useMemo, useState } from 'react'
 import { useSelector } from 'react-redux'
 import { BlockchainState, RootState, Token } from 'store/types'
-import { shortenAddress } from 'utils/addressShortener'
+import { shortenAddress } from 'utils/shorten'
 import { cryptoFormat, numberFormat } from 'utils/format'
 import { toBigNumber } from 'utils/useMoneyFormatter'
 import LoadingSpinner from './LoadingSpinner'
@@ -42,7 +42,7 @@ const TokenHolders = (props: Props) => {
 
   const getHolders = async () => {
     const response = await client.blockchain.getSmartContractSubState(
-      fromBech32Address(token.address_bech32),
+      fromBech32Address(token.address),
       'balances',
       []
     )

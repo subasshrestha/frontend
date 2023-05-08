@@ -3,9 +3,10 @@ import { createChart, IChartApi, ISeriesApi, Time, UTCTimestamp } from 'lightwei
 import { useTheme } from 'next-themes'
 
 interface Props {
-  data: {time: string, value: number}[],
+  data: {time: string, value: number, value_zil?: number}[],
   isUserInteractionEnabled?: boolean,
   isScalesEnabled?: boolean,
+  isZilValue?: boolean
 }
 
 export interface ChartDataPoint {
@@ -67,7 +68,7 @@ function Chart(props: Props) {
       props.data.forEach(rate => {
         data.push({
           time: (Date.parse(rate.time) / 1000) as UTCTimestamp,
-          value: rate.value
+          value: props.isZilValue ? rate.value_zil! : rate.value
         })
       })
 
@@ -82,8 +83,8 @@ function Chart(props: Props) {
         crosshairMarkerVisible: props.isUserInteractionEnabled ? true : false,
         autoscaleInfoProvider: () => ({
           priceRange: {
-              minValue: Math.min(...props.data.map(item => item.value)),
-              maxValue: Math.max(...props.data.map(item => item.value)),
+              minValue: Math.min(...props.data.map(item => props.isZilValue ? item.value_zil! : item.value)),
+              maxValue: Math.max(...props.data.map(item => props.isZilValue ? item.value_zil! : item.value)),
           },
         }),
       });
@@ -97,16 +98,42 @@ function Chart(props: Props) {
   }, [])
 
   useEffect(() => {
+    if(series) {
+      chart?.removeSeries(series)
+    }
+    
     var data: ChartDataPoint[] = [];
-
+    props.data.sort((a,b) =>  new Date(a.time).getTime()  -  new Date(b.time).getTime())
     props.data.forEach(rate => {
       data.push({
         time: (Date.parse(rate.time) / 1000) as UTCTimestamp,
-        value: rate.value
+        value: props.isZilValue ? rate.value_zil! : rate.value
       })
     })
 
-    series?.setData(data)
+    const isIncrease = data.length > 0 &&  data?.[0].value < data?.[data.length-1].value
+
+    const newSeries = chart?.addAreaSeries({
+      topColor: isIncrease ? 'rgba(76, 175, 80, 0.56)' : 'rgba(255, 82, 82, 0.56)',
+      bottomColor: isIncrease ? 'rgba(76, 175, 80, 0.04)' : 'rgba(255, 82, 82, 0.04)',
+      lineColor: isIncrease ? 'rgba(76, 175, 80, 1)' : 'rgba(255, 82, 82, 1)',
+      lineWidth: 2,
+      priceLineVisible: false,
+      crosshairMarkerVisible: props.isUserInteractionEnabled ? true : false,
+      autoscaleInfoProvider: () => ({
+        priceRange: {
+            minValue: Math.min(...props.data.map(item => props.isZilValue ? item.value_zil! : item.value)),
+            maxValue: Math.max(...props.data.map(item => props.isZilValue ? item.value_zil! : item.value)),
+        },
+      }),
+    });
+
+    newSeries?.setData(data)
+
+    if(newSeries) {
+      setSeries(newSeries)
+    }
+
     chart?.timeScale().fitContent()
   }, [props.data])
 

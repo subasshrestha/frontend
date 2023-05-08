@@ -17,7 +17,7 @@ import BigNumber from 'bignumber.js'
 import Link from 'next/link'
 import LoadingSpaceHeader from 'components/LoadingSpaceHeader'
 import LoadingProposal from 'components/LoadingProposal'
-import { shortenAddress } from 'utils/addressShortener'
+import { shortenAddress } from 'utils/shorten'
 import CastVote from 'components/CastVote'
 import dayjs from 'dayjs'
 import Head from 'next/head'
@@ -144,7 +144,7 @@ function VoteProposal() {
       <div className="max-w-5xl mx-auto">
         {token ? (
           <div className="flex items-center gap-3 pt-8 pb-4">
-            <div className="w-16 h-16 rounded-lg"><TokenIcon address={token?.address_bech32} /></div>
+            <div className="w-16 h-16 rounded-lg"><TokenIcon address={token?.address} /></div>
             <div className="flex flex-col">
               <Link href={`/vote/${space?.symbol.toLowerCase()}`}>
                 <a className="font-normal">

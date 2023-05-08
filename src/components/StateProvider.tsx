@@ -1,18 +1,24 @@
+import { Zilliqa } from '@zilliqa-js/zilliqa'
 import getZilRates from 'lib/coingecko/getZilRates'
 import { STREAM_ADDRESS, ZIL_ADDRESS } from 'lib/constants'
+import getCollectionsOwnerStates from 'lib/zilstream/getCollectionsOwnerStates'
+import getCollectionsOwnerState from 'lib/zilstream/getCollectionsOwnerStates'
+import getNftCollections from 'lib/zilstream/getNftCollections'
 import getPortfolioState from 'lib/zilstream/getPortfolio'
 import getTokens from 'lib/zilstream/getTokens'
+import getTokensFromCollectionsOwnerStates from 'lib/zilstream/getTokensFromCollectionsOwnerState'
 import React, { useEffect, useState } from 'react'
 import { batch, useDispatch, useSelector, useStore } from 'react-redux'
 import { startSagas } from 'saga/saga'
 import { AccountActionTypes, updateWallet } from 'store/account/actions'
 import { setAlertState, updateAlert } from 'store/alert/actions'
+import { CollectionActionTypes } from 'store/collection/actions'
 import { CurrencyActionTypes } from 'store/currency/actions'
-import { setNotificationState } from 'store/notification/actions'
+import { setNotificationState, updateNotification } from 'store/notification/actions'
 import { updateSettings } from 'store/settings/actions'
 import { updateSwap } from 'store/swap/actions'
 import { TokenActionTypes } from 'store/token/actions'
-import { AccountState, AlertState, BlockchainState, NotificationState, RootState, SettingsState, StakingState, SwapState, Token, TokenState } from 'store/types'
+import { AccountState, AlertState, BlockchainState, CollectionState, NftToken, NotificationState, RootState, SettingsState, StakingState, SwapState, Token, TokenState } from 'store/types'
 import { Indicator, Metric } from 'types/metric.interface'
 import { AccountType } from 'types/walletType.interface'
 import { getTokenAPR } from 'utils/apr'
@@ -29,6 +35,7 @@ const StateProvider = (props: Props) => {
   const blockchainState = useSelector<RootState, BlockchainState>(state => state.blockchain)
   const accountState = useSelector<RootState, AccountState>(state => state.account)
   const tokenState = useSelector<RootState, TokenState>(state => state.token)
+  const collectionState = useSelector<RootState, CollectionState>(state => state.collection)
   const stakingState = useSelector<RootState, StakingState>(state => state.staking)
   const settingsState = useSelector<RootState, SettingsState>(state => state.settings)
   const swapState = useSelector<RootState, SwapState>(state => state.swap)
@@ -36,37 +43,38 @@ const StateProvider = (props: Props) => {
   const notificationState = useSelector<RootState, NotificationState>(state => state.notification)
   const dispatch = useDispatch()
   const [stakingLoaded, setStakingLoaded] = useState(false)
+  const zilliqa = new Zilliqa('https://api.zilliqa.com')
 
   async function loadTokens() {
-    const tokens = await getTokens()
+    var tokens = await getTokens()
     if(tokens.length === 0) return
+
+    tokens = tokens.filter(token => token.address === ZIL_ADDRESS || token.reviewed)
 
     batch(() => {
       if(!tokenState.initialized) {
         for (let i = 0; i < tokens.length; i++) {
-          tokens[i].isZil = tokens[i].address_bech32 === ZIL_ADDRESS
-          tokens[i].isStream = tokens[i].address_bech32 === STREAM_ADDRESS
+          tokens[i].isZil = tokens[i].address === ZIL_ADDRESS
+          tokens[i].isStream = tokens[i].address === STREAM_ADDRESS
         }
         dispatch({type: TokenActionTypes.TOKEN_INIT, payload: {tokens}})
       } else {
         tokens.forEach(token => {
-          const { address_bech32, ...tokenDetails} = token
+          const { address, ...tokenDetails} = token
           dispatch({type: TokenActionTypes.TOKEN_UPDATE, payload: {
-            address_bech32: address_bech32,
+            address: address,
             ...tokenDetails
           }})
         })
       }
     })
 
-    if(tokens.length > 0 && swapState.tokenInAddress === null && swapState.tokenOutAddress === null) {
-      dispatch(updateSwap({
-        tokenInAddress: tokens.filter(t => t.symbol === 'ZIL')[0].address_bech32,
-        tokenOutAddress: tokens.filter(t => t.symbol === 'STREAM')[0].address_bech32
-      }))
-    }
-
     processAlerts()
+  }
+
+  async function loadNftCollections() {
+    let collections = await getNftCollections()
+    dispatch({type: CollectionActionTypes.COLLECTION_INIT, payload: {collections}})
   }
 
   async function setFavorites() {
@@ -76,7 +84,7 @@ const StateProvider = (props: Props) => {
     batch(() => {
       favorites.forEach(address => {
         dispatch({type: TokenActionTypes.TOKEN_UPDATE, payload: {
-          address_bech32: address,
+          address: address,
           isFavorited: true
         }})
       })
@@ -88,7 +96,7 @@ const StateProvider = (props: Props) => {
       tokenState.tokens.forEach(token => {
         const apr = getTokenAPR(token, tokenState)
         dispatch({type: TokenActionTypes.TOKEN_UPDATE, payload: {
-          address_bech32: token.address_bech32,
+          address: token.address,
           apr: apr
         }})
       })
@@ -114,6 +122,35 @@ const StateProvider = (props: Props) => {
     let batchResults = await getPortfolioState(accountState.selectedWallet.address, tokenState.tokens, stakingState.operators)
 
     await processBatchResults(batchResults)
+  }
+
+  async function loadCollectionState() {
+    if(!accountState.selectedWallet || collectionState.initialized === false) return
+    let ownerStates = await getCollectionsOwnerStates(collectionState.collections)
+    let ownedTokens = await getTokensFromCollectionsOwnerStates(accountState.selectedWallet.address, ownerStates)
+
+    batch(() => {
+      collectionState.collections.forEach(collection => {
+        dispatch({type: CollectionActionTypes.COLLECTION_UPDATE, payload:{
+          address: collection.address,
+          tokens: []
+        }})
+      })
+
+      Object.keys(ownedTokens).forEach(address => {
+        var tokens: NftToken[] = []
+        ownedTokens[address].forEach(token => {
+          tokens.push({
+            id: token,
+          })
+        })
+
+        dispatch({type: CollectionActionTypes.COLLECTION_UPDATE, payload:{
+          address: address,
+          tokens: tokens
+        }})
+      })
+    })
   }
 
   async function fetchStakingState() {
@@ -144,6 +181,10 @@ const StateProvider = (props: Props) => {
         ...settings,
         initialized: true
       }))
+    } else {
+      dispatch(updateSettings({
+        initialized: true
+      }))
     }
   }
 
@@ -168,7 +209,33 @@ const StateProvider = (props: Props) => {
         ...notifications,
         initialized: true
       }))
+    } else {
+      dispatch(setNotificationState({
+        notifications: [],
+        initialized: true
+      }))
     }
+  }
+
+  async function checkPendingNotifications() {
+    let pendingNotifications = notificationState.notifications.filter(notification => notification.status === "pending")
+
+    pendingNotifications.forEach(async notification => {
+      let tx = await zilliqa.blockchain.getTransactionStatus(notification.hash)
+      if(tx.status === 3) {
+        // Tx confirmed
+        dispatch(updateNotification({
+          hash: notification.hash,
+          status: "confirmed"
+        }))
+      } else if(tx.status >= 10) {
+        // Tx rejected
+        dispatch(updateNotification({
+          hash: notification.hash,
+          status: "rejected"
+        }))
+      }
+    })
   }
 
   async function processAlerts() {
@@ -180,8 +247,8 @@ const StateProvider = (props: Props) => {
       // Check if the alert has already been triggered, if the case skip it immediately.
       if(alert.triggered) return
 
-      let token = tokenState.tokens.filter(token => token.address_bech32 === alert.token_address)?.[0]
-      let currentRate = alert.metric === Metric.PriceZIL ? token.market_data.rate : token.market_data.rate_usd
+      let token = tokenState.tokens.filter(token => token.address === alert.token_address)?.[0]
+      let currentRate = alert.metric === Metric.PriceZIL ? token.market_data.rate_zil : token.market_data.rate_usd
       let targetRate = alert.value
 
       if(alert.indicator === Indicator.Above) {
@@ -205,8 +272,8 @@ const StateProvider = (props: Props) => {
     })
 
     function sendPriceNotificationForToken(token: Token) {
-      new Notification(`${token.symbol}: ${cryptoFormat(token.market_data.rate)} ZIL (${currencyFormat(token.market_data.rate_usd)})`, {
-        body: `${token.name}'s (${token.symbol}) current price is ${cryptoFormat(token.market_data.rate)} ZIL (${currencyFormat(token.market_data.rate_usd)}).`,
+      new Notification(`${token.symbol}: ${cryptoFormat(token.market_data.rate_zil)} ZIL (${currencyFormat(token.market_data.rate_usd)})`, {
+        body: `${token.name}'s (${token.symbol}) current price is ${cryptoFormat(token.market_data.rate_zil)} ZIL (${currencyFormat(token.market_data.rate_usd)}).`,
         icon: token.icon
       })
     }
@@ -220,6 +287,7 @@ const StateProvider = (props: Props) => {
     if(!tokenState.initialized) return
     loadTokens()
     loadWalletState()
+    checkPendingNotifications()
   }, [blockchainState.blockHeight])
 
   useEffect(() => {
@@ -228,6 +296,7 @@ const StateProvider = (props: Props) => {
     loadNotifications()
     loadTokens()
     loadZilRates()
+    loadNftCollections()
 
     startSagas()
   }, [])
@@ -237,6 +306,11 @@ const StateProvider = (props: Props) => {
     setFavorites()
     setTokenAPRs()
   }, [tokenState.initialized])
+
+  useEffect(() => {
+    if(!collectionState.initialized || !accountState.selectedWallet) return
+    loadCollectionState()
+  }, [collectionState.initialized, accountState.selectedWallet])
 
   useEffect(() => {
     if(!tokenState.initialized || !accountState.selectedWallet) return
@@ -275,7 +349,7 @@ const StateProvider = (props: Props) => {
       dispatch({ type: AccountActionTypes.INIT_ACCOUNT, payload: account })
 
       if(account.wallets.filter(a => a.type === AccountType.ZilPay).length > 0) {
-        // Has ZilPay wallet, try to connect
+        // Has Zil Pay wallet, try to connect
         connectZilPay()
       }
     } else {
