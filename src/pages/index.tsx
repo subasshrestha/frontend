@@ -391,7 +391,7 @@ function Home() {
             </>
           ) : (
             <>
-              <SponsorBlock link="https://torchwallet.io" />
+              <SponsorBlock link="https://plunderswap.com" />
 
               <RatesBlock
                 title="ZIL"
